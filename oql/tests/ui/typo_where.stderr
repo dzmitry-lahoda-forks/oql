@@ -1,0 +1,5 @@
+error: expected `let`, `where`, `orderby`, `join`, `group`, or `select`
+ --> tests/ui/typo_where.rs:7:9
+  |
+7 |         wheere x > 1
+  |         ^^^^^^

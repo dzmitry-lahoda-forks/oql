@@ -1,0 +1,5 @@
+error: expected `from`
+ --> tests/ui/missing_from.rs:6:9
+  |
+6 |         where x > 1
+  |         ^^^^^

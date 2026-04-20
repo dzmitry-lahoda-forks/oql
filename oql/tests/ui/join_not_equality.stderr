@@ -1,0 +1,5 @@
+error: `join` requires an equality condition of the form `on a == b`
+  --> tests/ui/join_not_equality.rs:10:25
+   |
+10 |         join b in ys on a.k > b.k
+   |                         ^^^^^^^^^

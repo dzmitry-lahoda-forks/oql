@@ -1,0 +1,22 @@
+[package]
+name = "oql-macro"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+license.workspace = true
+description = "Proc-macro implementation for the `oql` crate; end users should depend on `oql` instead"
+readme = "../README.md"
+documentation = "https://docs.rs/oql"
+keywords = ["query", "iterator", "proc-macro"]
+categories = ["rust-patterns", "development-tools::procedural-macro-helpers"]
+
+[lib]
+proc-macro = true
+
+[dependencies]
+syn = { version = "2", features = ["full", "extra-traits"] }
+quote = "1"
+proc-macro2 = "1"

@@ -1,0 +1,32 @@
+[package]
+name = "oql"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+license.workspace = true
+description = "Readable, declarative query syntax for Rust iterators"
+readme = "../README.md"
+documentation = "https://docs.rs/oql"
+keywords = ["query", "iterator", "dsl", "macro"]
+categories = ["rust-patterns"]
+
+[dependencies]
+oql-macro = { version = "1.0.0", path = "../oql-macro" }
+
+[dev-dependencies]
+trybuild = "1"
+criterion = { version = "0.8", features = ["html_reports"] }
+
+[[bench]]
+name = "throughput"
+harness = false
+
+[package.metadata.docs.rs]
+# Generate docs with all features enabled. The crate is trivially small
+# (no features currently), but this sets us up for later and makes the
+# docs.rs badge link resolve cleanly.
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]

@@ -1,0 +1,11 @@
+error: unexpected end of input, expected `let`, `where`, `orderby`, `join`, `group`, or `select`
+ --> tests/ui/missing_select.rs:5:21
+  |
+5 |       let _: Vec<_> = oql! {
+  |  _____________________^
+6 | |         from x in xs
+7 | |         where x > 1
+8 | |     }
+  | |_____^
+  |
+  = note: this error originates in the macro `oql` (in Nightly builds, run with -Z macro-backtrace for more info)
