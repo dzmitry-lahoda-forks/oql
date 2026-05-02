@@ -19,6 +19,10 @@ oql-macro = { version = "1.0.0", path = "../oql-macro" }
 [dev-dependencies]
 trybuild = "1"
 criterion = { version = "0.8", features = ["html_reports"] }
+# https://github.com/fereidani/layout/pull/1
+layout = { git = "https://github.com/dzmitry-lahoda-forks/layout.git", rev = "507186970c57e8a168783ddefabf8cb08d7ba505", features = ["tuple", "std"] }
+derive_more = { version = "2.1", features = ["from"] }
+branches = "0.3"
 
 [[bench]]
 name = "throughput"

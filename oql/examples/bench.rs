@@ -32,9 +32,18 @@ pub fn oql_hand(users: Vec<User>) -> Vec<(&'static str, u32)> {
 
 fn main() {
     let users = vec![
-        User { name: "Anna", age: 30 },
-        User { name: "Ben", age: 17 },
-        User { name: "Carla", age: 42 },
+        User {
+            name: "Anna",
+            age: 30,
+        },
+        User {
+            name: "Ben",
+            age: 17,
+        },
+        User {
+            name: "Carla",
+            age: 42,
+        },
     ];
     let a = oql_macro(users.clone());
     let b = oql_hand(users);

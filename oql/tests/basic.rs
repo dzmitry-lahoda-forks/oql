@@ -140,9 +140,18 @@ fn struct_fields() {
         age: u32,
     }
     let users = vec![
-        User { name: "Anna", age: 30 },
-        User { name: "Ben", age: 17 },
-        User { name: "Carla", age: 42 },
+        User {
+            name: "Anna",
+            age: 30,
+        },
+        User {
+            name: "Ben",
+            age: 17,
+        },
+        User {
+            name: "Carla",
+            age: 42,
+        },
     ];
     let adults: Vec<(&'static str, u32)> = oql! {
         from u in users

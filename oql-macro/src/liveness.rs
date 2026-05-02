@@ -124,8 +124,11 @@ fn step_backwards(live_after: &HashSet<String>, clause: &MiddleClause) -> HashSe
     match clause {
         MiddleClause::Let { name, value } => {
             // `let name = value;`; defines `name`, reads idents in `value`.
-            let mut out: HashSet<String> =
-                live_after.iter().filter(|s| s.as_str() != name.to_string().as_str()).cloned().collect();
+            let mut out: HashSet<String> = live_after
+                .iter()
+                .filter(|s| s.as_str() != name.to_string().as_str())
+                .cloned()
+                .collect();
             out.extend(idents_in_tokens(&value.to_token_stream()));
             out
         }
@@ -153,11 +156,26 @@ fn step_backwards(live_after: &HashSet<String>, clause: &MiddleClause) -> HashSe
             let mut out: HashSet<String> = live_after
                 .iter()
                 .filter(|s| s.as_str() != name_s.as_str())
-                .filter(|s| group_s.as_ref().map(|g| g.as_str() != s.as_str()).unwrap_or(true))
+                .filter(|s| {
+                    group_s
+                        .as_ref()
+                        .map(|g| g.as_str() != s.as_str())
+                        .unwrap_or(true)
+                })
                 .cloned()
                 .collect();
             out.extend(idents_in_tokens(&j.outer_key.to_token_stream()));
             out
+        }
+        MiddleClause::Zip { name, .. } => {
+            // `zip name in source` / `zip_must name in source`; defines
+            // `name`. The source expression is an independent iterator,
+            // not evaluated against the current row environment.
+            live_after
+                .iter()
+                .filter(|s| s.as_str() != name.to_string().as_str())
+                .cloned()
+                .collect()
         }
         MiddleClause::GroupBy { element, key, name } => {
             // `group <element> by <key> into <name>`.
@@ -170,7 +188,7 @@ fn step_backwards(live_after: &HashSet<String>, clause: &MiddleClause) -> HashSe
             // (minus `name` itself) is not carried backwards, because
             // those bindings don't survive the barrier.
             let _ = live_after; // intentionally dropped
-            let _ = name;       // name is a fresh binding, not a read
+            let _ = name; // name is a fresh binding, not a read
             let mut out = HashSet::new();
             out.extend(idents_in_tokens(&element.to_token_stream()));
             out.extend(idents_in_tokens(&key.to_token_stream()));

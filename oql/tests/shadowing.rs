@@ -11,7 +11,8 @@ fn let_shadows_from_binding() {
         from x in xs
         let x = x * 10
         select x
-    }.collect();
+    }
+    .collect();
     assert_eq!(out, vec![10, 20, 30]);
 }
 
@@ -23,7 +24,8 @@ fn let_shadows_earlier_let() {
         let y = n * 2
         let y = y + 100
         select y
-    }.collect();
+    }
+    .collect();
     assert_eq!(out, vec![102, 104, 106]);
 }
 
@@ -35,7 +37,8 @@ fn shadowing_let_then_where() {
         let x = x * 10
         where x > 20
         select x
-    }.collect();
+    }
+    .collect();
     assert_eq!(out, vec![30, 40, 50]);
 }
 
@@ -47,7 +50,8 @@ fn shadowing_let_then_orderby() {
         let x = x * 10
         orderby x desc
         select x
-    }.collect();
+    }
+    .collect();
     assert_eq!(out, vec![30, 20, 10]);
 }
 
@@ -60,7 +64,8 @@ fn multiple_consecutive_shadows() {
         let x = x * 2
         let x = x - 1
         select x
-    }.collect();
+    }
+    .collect();
     // (1+1)*2-1 = 3, (2+1)*2-1 = 5, (3+1)*2-1 = 7
     assert_eq!(out, vec![3, 5, 7]);
 }
@@ -75,6 +80,7 @@ fn non_shadowing_let_still_works() {
         let doubled = n * 2
         let tripled = n * 3
         select (doubled, tripled)
-    }.collect();
+    }
+    .collect();
     assert_eq!(out, vec![(2, 3), (4, 6), (6, 9)]);
 }
