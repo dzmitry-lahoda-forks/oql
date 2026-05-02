@@ -59,6 +59,17 @@ pub enum MiddleClause {
     /// `join <n> in <source> on <outer_key> == <inner_key>`, optionally
     /// `into <g>` for a group-join.
     Join(Box<JoinClause>),
+    /// `zip <n> in <source>` or `zip_must <n> in <source>`; pair each
+    /// current row with the next item from `source`.
+    Zip {
+        /// The name of the new binding.
+        name: Ident,
+        /// The source to zip with the current pipeline.
+        source: Expr,
+        /// If true, panic if either side ends first. Otherwise stop at the
+        /// shorter iterator, matching `Iterator::zip`.
+        must_match: bool,
+    },
     /// `group <element> by <key> into <name>`.
     ///
     /// Collects every element seen so far into groups keyed by `key`, then
@@ -99,6 +110,15 @@ pub struct JoinClause {
     /// environment per outer element, with `g` bound to a `Vec<Inner>` of
     /// all matches (empty if none).
     pub into_group: Option<Ident>,
+    /// If true, an outer row without any inner matches panics instead of
+    /// being dropped.
+    pub must_match: bool,
+    /// If true, an outer row without any inner matches is kept and the join
+    /// binding is `None`; matches bind `Some(inner)`.
+    pub left_join: bool,
+    /// If true, keep only the last inner row for each key while building the
+    /// join map.
+    pub last_match: bool,
 }
 
 /// `select <expr>`.

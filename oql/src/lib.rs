@@ -36,6 +36,11 @@
 //! | `orderby key`                           | Sorts ascending |
 //! | `orderby key desc`                      | Sorts descending |
 //! | `join y in src on a == b`               | Inner equality join (hash-join under the hood) |
+//! | `join_must y in src on a == b`          | Inner equality join that panics if an outer row has no match |
+//! | `join_left y in src on a == b`          | Left equality join; missing inner fields project as `None` |
+//! | `last_must y in src on a == b`          | Keep only the last inner row per key and panic if none matches |
+//! | `zip y in src`                          | Pair rows by position, stopping when either side ends |
+//! | `zip_must y in src`                     | Pair rows by position; panics if the two sources have different lengths |
 //! | `join y in src on a == b into g`        | Group-join: `g` is a `Vec<Y>` of matches (empty if none) |
 //! | `group elem by key into g`              | Group elements by key; `g.key` and `g.items` downstream |
 //! | `select expr`                           | Projects to the output type |

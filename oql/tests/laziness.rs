@@ -58,7 +58,11 @@ fn select_not_called_when_take_is_zero() {
     .collect();
 
     assert!(out.is_empty());
-    assert_eq!(select_calls.get(), 0, "select must not run if nothing is consumed");
+    assert_eq!(
+        select_calls.get(),
+        0,
+        "select must not run if nothing is consumed"
+    );
 }
 
 #[test]
@@ -115,9 +119,14 @@ fn where_after_join_runs_once_per_match() {
     let select_calls = Cell::new(0);
 
     #[derive(Clone)]
-    struct A { k: u32 }
+    struct A {
+        k: u32,
+    }
     #[derive(Clone)]
-    struct B { k: u32, flag: bool }
+    struct B {
+        k: u32,
+        flag: bool,
+    }
 
     let aa = vec![A { k: 1 }, A { k: 2 }, A { k: 3 }];
     let bb = vec![

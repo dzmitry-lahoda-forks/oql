@@ -30,12 +30,16 @@ impl Parse for Query {
         let select = input.parse::<SelectClause>()?;
 
         if !input.is_empty() {
-            return Err(input.error(
-                "unexpected tokens after `select`; `select` must be the last clause",
-            ));
+            return Err(
+                input.error("unexpected tokens after `select`; `select` must be the last clause")
+            );
         }
 
-        Ok(Query { from, middle, select })
+        Ok(Query {
+            from,
+            middle,
+            select,
+        })
     }
 }
 
@@ -80,12 +84,22 @@ impl Parse for MiddleClause {
             };
             Ok(MiddleClause::OrderBy { key, descending })
         } else if peek_keyword(input, "join") {
-            parse_join(input)
+            parse_join(input, false, false, false)
+        } else if peek_keyword(input, "join_must") {
+            parse_join(input, true, false, false)
+        } else if peek_keyword(input, "join_left") {
+            parse_join(input, false, true, false)
+        } else if peek_keyword(input, "last_must") {
+            parse_join(input, true, false, true)
+        } else if peek_keyword(input, "zip") {
+            parse_zip(input, false)
+        } else if peek_keyword(input, "zip_must") {
+            parse_zip(input, true)
         } else if peek_keyword(input, "group") {
             parse_group_by(input)
         } else {
             Err(input.error(
-                "expected `let`, `where`, `orderby`, `join`, `group`, or `select`",
+                "expected `let`, `where`, `orderby`, `join`, `join_must`, `join_left`, `last_must`, `zip`, `zip_must`, `group`, or `select`",
             ))
         }
     }
@@ -96,12 +110,27 @@ impl Parse for MiddleClause {
 /// The `on` clause is parsed as a single `Expr`, then split on a top-level
 /// `==`. This avoids the need to guess where the outer-key expression ends;
 /// the expression parser handles nesting and operator precedence for us.
-fn parse_join(input: ParseStream) -> syn::Result<MiddleClause> {
-    eat_keyword(input, "join")?;
+fn parse_join(
+    input: ParseStream,
+    must_match: bool,
+    left_join: bool,
+    last_match: bool,
+) -> syn::Result<MiddleClause> {
+    if must_match {
+        if last_match {
+            eat_keyword(input, "last_must")?;
+        } else {
+            eat_keyword(input, "join_must")?;
+        }
+    } else if left_join {
+        eat_keyword(input, "join_left")?;
+    } else {
+        eat_keyword(input, "join")?;
+    }
     let name: Ident = input.parse()?;
-    input.parse::<Token![in]>().map_err(|e| {
-        syn::Error::new(e.span(), "expected `in` after name in `join` clause")
-    })?;
+    input
+        .parse::<Token![in]>()
+        .map_err(|e| syn::Error::new(e.span(), "expected `in` after name in `join` clause"))?;
     let source: Expr = input.parse()?;
     expect_keyword(input, "on")?;
     let condition: Expr = input.parse()?;
@@ -127,7 +156,29 @@ fn parse_join(input: ParseStream) -> syn::Result<MiddleClause> {
         outer_key,
         inner_key,
         into_group,
+        must_match,
+        left_join,
+        last_match,
     })))
+}
+
+/// Parses `zip <name> in <source>` and `zip_must <name> in <source>`.
+fn parse_zip(input: ParseStream, must_match: bool) -> syn::Result<MiddleClause> {
+    if must_match {
+        eat_keyword(input, "zip_must")?;
+    } else {
+        eat_keyword(input, "zip")?;
+    }
+    let name: Ident = input.parse()?;
+    input
+        .parse::<Token![in]>()
+        .map_err(|e| syn::Error::new(e.span(), "expected `in` after name in `zip` clause"))?;
+    let source: Expr = input.parse()?;
+    Ok(MiddleClause::Zip {
+        name,
+        source,
+        must_match,
+    })
 }
 
 /// Parses `group <element> by <key> into <name>`.

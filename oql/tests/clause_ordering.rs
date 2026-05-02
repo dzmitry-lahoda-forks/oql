@@ -124,16 +124,34 @@ fn multiple_wheres_order_independent() {
 fn where_between_joins() {
     // `where` must be able to filter on the joined binding between two joins.
     #[derive(Clone)]
-    struct A { k: u32, v: &'static str }
+    struct A {
+        k: u32,
+        v: &'static str,
+    }
     #[derive(Clone)]
-    struct B { k: u32, flag: bool, k2: u32 }
+    struct B {
+        k: u32,
+        flag: bool,
+        k2: u32,
+    }
     #[derive(Clone)]
-    struct C { k2: u32, w: &'static str }
+    struct C {
+        k2: u32,
+        w: &'static str,
+    }
 
     let aa = vec![A { k: 1, v: "a" }];
     let bb = vec![
-        B { k: 1, flag: true, k2: 10 },
-        B { k: 1, flag: false, k2: 11 },
+        B {
+            k: 1,
+            flag: true,
+            k2: 10,
+        },
+        B {
+            k: 1,
+            flag: false,
+            k2: 11,
+        },
     ];
     let cc = vec![C { k2: 10, w: "x" }, C { k2: 11, w: "y" }];
 

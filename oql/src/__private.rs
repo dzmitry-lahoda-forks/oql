@@ -34,6 +34,54 @@ pub trait SortAndStrip: Sized {
     fn __oql_sort_and_strip(self) -> Self::Out;
 }
 
+/// Adds strict zip semantics to generated iterator pipelines.
+pub trait MustZipExt: Iterator + Sized {
+    /// Zip with `rhs`, panicking if the two iterators have different lengths.
+    fn __oql_must_zip<R>(self, rhs: R) -> MustZip<Self, R::IntoIter>
+    where
+        R: IntoIterator;
+}
+
+impl<I> MustZipExt for I
+where
+    I: Iterator,
+{
+    #[inline]
+    fn __oql_must_zip<R>(self, rhs: R) -> MustZip<Self, R::IntoIter>
+    where
+        R: IntoIterator,
+    {
+        MustZip {
+            left: self,
+            right: rhs.into_iter(),
+        }
+    }
+}
+
+/// Must-match zip iterator used by `zip_must name in source` expansion.
+pub struct MustZip<L, R> {
+    left: L,
+    right: R,
+}
+
+impl<L, R> Iterator for MustZip<L, R>
+where
+    L: Iterator,
+    R: Iterator,
+{
+    type Item = (L::Item, R::Item);
+
+    #[inline]
+    fn next(&mut self) -> Option<Self::Item> {
+        match (self.left.next(), self.right.next()) {
+            (Some(left), Some(right)) => Some((left, right)),
+            (None, None) => None,
+            (Some(_), None) => panic!("oql zip sources have different lengths"),
+            (None, Some(_)) => panic!("oql zip sources have different lengths"),
+        }
+    }
+}
+
 impl<K, T> SortAndStrip for ::std::vec::Vec<(K, T)>
 where
     K: Ord,
@@ -96,14 +144,11 @@ impl<T> ::core::iter::Iterator for JoinMatches<T> {
             JoinMatches::Once(::core::option::Option::Some(_)) => {
                 (1, ::core::option::Option::Some(1))
             }
-            JoinMatches::Once(::core::option::Option::None) => {
-                (0, ::core::option::Option::Some(0))
-            }
+            JoinMatches::Once(::core::option::Option::None) => (0, ::core::option::Option::Some(0)),
             JoinMatches::Many(iter) => iter.size_hint(),
         }
     }
 }
-
 
 /// The output of a `group by` clause.
 ///

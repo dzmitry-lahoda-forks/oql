@@ -37,6 +37,11 @@ crate.
 | `orderby key`                           | Sorts ascending                                        |
 | `orderby key desc`                      | Sorts descending                                       |
 | `join y in src on a == b`               | Inner equality join (hash-join under the hood)         |
+| `join_must y in src on a == b`          | Inner equality join that panics if an outer row has no match |
+| `join_left y in src on a == b`          | Left equality join; missing inner fields project as `None` |
+| `last_must y in src on a == b`          | Keep only the last inner row per key and panic if none matches |
+| `zip y in src`                          | Pair rows by position, stopping when either side ends |
+| `zip_must y in src`                     | Pair rows by position; panics if the two sources have different lengths |
 | `join y in src on a == b into g`        | Group-join: `g` is a `Vec<Y>` of matches (empty if none) |
 | `group elem by key into g`              | Group elements by key; `g.key` and `g.items` downstream  |
 | `select expr`                           | Projects to the output type                            |
@@ -205,7 +210,15 @@ emits a plain iterator chain. Each clause maps to a familiar adapter:
 - `join y in src on a == b` builds a `HashMap<K, Vec<T>>` from the
   inner source in a preamble, then a `.flat_map(...)` on the outer
   iterator probes it. `O(n + m)` instead of the naive `O(n · m)`
-  nested loop.
+  nested loop. `join_must` uses the same expansion, but panics instead
+  of dropping an outer row when the lookup has no match. `join_left`
+  keeps unmatched outer rows and projects joined fields as `Option`s.
+  `last_must` stores only the last inner row for each key, so it avoids
+  allocating per-key match vectors when only the final match is needed.
+- `zip y in src` pairs each current row with the next row from `src`,
+  matching Rust's standard `Iterator::zip` by stopping when either side
+  ends. Use `zip_must y in src` when the two sources must have the same
+  length; it panics if either side ends first.
 - `select` becomes `.map(|env| projection)`.
 
 Between steps, the macro propagates an *environment tuple* of every

@@ -1,4 +1,4 @@
-error: expected `let`, `where`, `orderby`, `join`, `group`, or `select`
+error: expected `let`, `where`, `orderby`, `join`, `join_must`, `join_left`, `last_must`, `zip`, `zip_must`, `group`, or `select`
  --> tests/ui/typo_where.rs:7:9
   |
 7 |         wheere x > 1

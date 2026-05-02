@@ -24,18 +24,64 @@ struct Customer {
 
 fn sample_data() -> (Vec<Order>, Vec<Customer>) {
     let orders = vec![
-        Order { customer_id: 1, price_cents: 4990,   quantity: 3,  discount_bp: 1000 },
-        Order { customer_id: 2, price_cents: 19900,  quantity: 1,  discount_bp: 0 },
-        Order { customer_id: 1, price_cents: 1250,   quantity: 10, discount_bp: 500 },
-        Order { customer_id: 3, price_cents: 120000, quantity: 1,  discount_bp: 2000 },
-        Order { customer_id: 4, price_cents: 3500,   quantity: 4,  discount_bp: 0 },
-        Order { customer_id: 2, price_cents: 50000,  quantity: 2,  discount_bp: 1500 },
+        Order {
+            customer_id: 1,
+            price_cents: 4990,
+            quantity: 3,
+            discount_bp: 1000,
+        },
+        Order {
+            customer_id: 2,
+            price_cents: 19900,
+            quantity: 1,
+            discount_bp: 0,
+        },
+        Order {
+            customer_id: 1,
+            price_cents: 1250,
+            quantity: 10,
+            discount_bp: 500,
+        },
+        Order {
+            customer_id: 3,
+            price_cents: 120000,
+            quantity: 1,
+            discount_bp: 2000,
+        },
+        Order {
+            customer_id: 4,
+            price_cents: 3500,
+            quantity: 4,
+            discount_bp: 0,
+        },
+        Order {
+            customer_id: 2,
+            price_cents: 50000,
+            quantity: 2,
+            discount_bp: 1500,
+        },
     ];
     let customers = vec![
-        Customer { id: 1, name: "Anna",   country: "DE" },
-        Customer { id: 2, name: "Ben",    country: "DE" },
-        Customer { id: 3, name: "Chiara", country: "IT" },
-        Customer { id: 4, name: "Dmitri", country: "US" },
+        Customer {
+            id: 1,
+            name: "Anna",
+            country: "DE",
+        },
+        Customer {
+            id: 2,
+            name: "Ben",
+            country: "DE",
+        },
+        Customer {
+            id: 3,
+            name: "Chiara",
+            country: "IT",
+        },
+        Customer {
+            id: 4,
+            name: "Dmitri",
+            country: "US",
+        },
     ];
     (orders, customers)
 }

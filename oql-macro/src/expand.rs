@@ -50,7 +50,8 @@
 use proc_macro2::TokenStream;
 use quote::quote;
 use std::collections::HashSet;
-use syn::{Expr, Ident, Pat};
+use syn::visit_mut::{self, VisitMut};
+use syn::{Expr, Ident, Member, Pat};
 
 use crate::ast::{FromClause, MiddleClause, Query, SelectClause};
 use crate::liveness::compute_live_after;
@@ -85,6 +86,7 @@ pub fn expand(query: &Query) -> TokenStream {
     // tuple. This is the dead-binding optimisation in action.
     let mut pending_lets: Vec<(Ident, Expr, bool, bool)> = Vec::new();
     let mut join_counter: usize = 0;
+    let mut optional_joins: HashSet<String> = HashSet::new();
 
     let mut i = 0;
     while i < query.middle.len() {
@@ -115,6 +117,7 @@ pub fn expand(query: &Query) -> TokenStream {
                 MiddleClause::Join(j) => {
                     s.extend(crate::liveness::reads_of_expr(&j.outer_key));
                 }
+                MiddleClause::Zip { .. } => {}
                 MiddleClause::GroupBy { element, key, .. } => {
                     s.extend(crate::liveness::reads_of_expr(element));
                     s.extend(crate::liveness::reads_of_expr(key));
@@ -138,7 +141,14 @@ pub fn expand(query: &Query) -> TokenStream {
                 // read, so we can't drop them yet. live_after would be
                 // too aggressive and would kick out bindings that the
                 // let's value expression is about to consume.
-                env = flush_sorts(&mut pipeline, &env, &mut pending_sorts, &mut pending_lets, &live_before);
+                env = flush_sorts(
+                    &mut pipeline,
+                    &env,
+                    &mut pending_sorts,
+                    &mut pending_lets,
+                    &live_before,
+                    &optional_joins,
+                );
                 // Defer: we'll bake this into the next real step's closure.
                 // If no real step follows, the tail flush emits a single
                 // combined `.map()`.
@@ -168,22 +178,82 @@ pub fn expand(query: &Query) -> TokenStream {
             MiddleClause::Where(cond) => {
                 // Same live_before logic as in Let: the sort must keep
                 // everything the `where` condition reads.
-                env = flush_sorts(&mut pipeline, &env, &mut pending_sorts, &mut pending_lets, &live_before);
+                env = flush_sorts(
+                    &mut pipeline,
+                    &env,
+                    &mut pending_sorts,
+                    &mut pending_lets,
+                    &live_before,
+                    &optional_joins,
+                );
                 // After a filter, the outgoing env is `env ∩ live`.
-                let outgoing_env: Vec<Ident> =
-                    env.iter().filter(|id| live.contains(&id.to_string())).cloned().collect();
-                emit_where(&mut pipeline, &env, &outgoing_env, cond, &mut pending_lets);
+                let outgoing_env: Vec<Ident> = env
+                    .iter()
+                    .filter(|id| live.contains(&id.to_string()))
+                    .cloned()
+                    .collect();
+                emit_where(
+                    &mut pipeline,
+                    &env,
+                    &outgoing_env,
+                    cond,
+                    &mut pending_lets,
+                    &optional_joins,
+                );
                 env = outgoing_env;
+                optional_joins.retain(|name| env.iter().any(|id| id.to_string() == *name));
             }
             MiddleClause::OrderBy { key, descending } => {
                 // orderby doesn't change the env shape; it's queued for the
                 // next real step. Liveness is applied at flush time.
                 pending_sorts.push((key.clone(), *descending));
             }
+            MiddleClause::Zip {
+                name,
+                source,
+                must_match,
+            } => {
+                env = flush_sorts(
+                    &mut pipeline,
+                    &env,
+                    &mut pending_sorts,
+                    &mut pending_lets,
+                    &live_before,
+                    &optional_joins,
+                );
+                let is_name_live = live.contains(&name.to_string());
+                let mut outgoing_env: Vec<Ident> = env
+                    .iter()
+                    .filter(|id| live.contains(&id.to_string()))
+                    .cloned()
+                    .collect();
+                if is_name_live {
+                    outgoing_env.push(name.clone());
+                }
+                emit_zip(
+                    &mut pipeline,
+                    &env,
+                    &outgoing_env,
+                    name,
+                    source,
+                    *must_match,
+                    &mut pending_lets,
+                    &optional_joins,
+                );
+                env = outgoing_env;
+                optional_joins.retain(|name| env.iter().any(|id| id.to_string() == *name));
+            }
             MiddleClause::Join(join) => {
                 // Same live_before logic: the sort must still keep the
                 // bindings this join's outer_key reads.
-                env = flush_sorts(&mut pipeline, &env, &mut pending_sorts, &mut pending_lets, &live_before);
+                env = flush_sorts(
+                    &mut pipeline,
+                    &env,
+                    &mut pending_sorts,
+                    &mut pending_lets,
+                    &live_before,
+                    &optional_joins,
+                );
 
                 if let Some(group_name) = &join.into_group {
                     // Group-join: yield exactly one environment per outer
@@ -219,10 +289,14 @@ pub fn expand(query: &Query) -> TokenStream {
                         &join.source,
                         &join.outer_key,
                         &join.inner_key,
+                        join.must_match,
+                        join.left_join,
                         join_counter,
                         &mut pending_lets,
+                        &optional_joins,
                     );
                     env = outgoing_env;
+                    optional_joins.retain(|name| env.iter().any(|id| id.to_string() == *name));
                     join_counter += 1;
                     i += 1;
                     continue;
@@ -253,7 +327,7 @@ pub fn expand(query: &Query) -> TokenStream {
                 // When fused, the outgoing env is the one the `where`
                 // would produce: (env+name) intersected with
                 // `live_after[i+1]`, i.e. the live set after the where.
-                let fused = if i + 1 < query.middle.len() {
+                let fused = if !join.left_join && !join.last_match && i + 1 < query.middle.len() {
                     match &query.middle[i + 1] {
                         MiddleClause::Where(cond) => {
                             // Safety check: every bare ident in `cond`
@@ -297,20 +371,43 @@ pub fn expand(query: &Query) -> TokenStream {
                 if is_name_live {
                     outgoing_env.push(join.name.clone());
                 }
-                emit_join(
-                    &mut preamble,
-                    &mut pipeline,
-                    &env,
-                    &outgoing_env,
-                    &join.name,
-                    &join.source,
-                    &join.outer_key,
-                    &join.inner_key,
-                    join_counter,
-                    &mut pending_lets,
-                    fused,
-                );
+                if join.last_match {
+                    emit_last_join(
+                        &mut preamble,
+                        &mut pipeline,
+                        &env,
+                        &outgoing_env,
+                        &join.name,
+                        &join.source,
+                        &join.outer_key,
+                        &join.inner_key,
+                        join_counter,
+                        &mut pending_lets,
+                        &optional_joins,
+                    );
+                } else {
+                    emit_join(
+                        &mut preamble,
+                        &mut pipeline,
+                        &env,
+                        &outgoing_env,
+                        &join.name,
+                        &join.source,
+                        &join.outer_key,
+                        &join.inner_key,
+                        join.must_match,
+                        join.left_join,
+                        join_counter,
+                        &mut pending_lets,
+                        &optional_joins,
+                        fused,
+                    );
+                }
                 env = outgoing_env;
+                optional_joins.retain(|name| env.iter().any(|id| id.to_string() == *name));
+                if join.left_join && is_name_live {
+                    optional_joins.insert(join.name.to_string());
+                }
                 join_counter += 1;
                 if consumed {
                     // We swallowed the next middle clause (the where).
@@ -326,7 +423,12 @@ pub fn expand(query: &Query) -> TokenStream {
                 // the sort output still contains what `element`/`key`
                 // read), then emit the group-by stage.
                 env = flush_sorts(
-                    &mut pipeline, &env, &mut pending_sorts, &mut pending_lets, &live_before,
+                    &mut pipeline,
+                    &env,
+                    &mut pending_sorts,
+                    &mut pending_lets,
+                    &live_before,
+                    &optional_joins,
                 );
                 // After group-by the only surviving binding is `name`;
                 // everything else dies at this barrier. So outgoing env
@@ -343,8 +445,10 @@ pub fn expand(query: &Query) -> TokenStream {
                     element,
                     key,
                     &mut pending_lets,
+                    &optional_joins,
                 );
                 env = outgoing_env;
+                optional_joins.retain(|name| env.iter().any(|id| id.to_string() == *name));
             }
         }
         i += 1;
@@ -352,14 +456,14 @@ pub fn expand(query: &Query) -> TokenStream {
     // Final flush before select. For the tail flush, the "live set" is the
     // reads of the select expression; the last entry in live_after is
     // unused (always empty), so we derive this set directly.
-    let live_before_select: HashSet<String> =
-        crate::liveness::reads_of_select(&query.select);
+    let live_before_select: HashSet<String> = crate::liveness::reads_of_select(&query.select);
     env = flush_sorts(
         &mut pipeline,
         &env,
         &mut pending_sorts,
         &mut pending_lets,
         &live_before_select,
+        &optional_joins,
     );
 
     // select: destructure the (now minimal) env tuple, project to output.
@@ -371,6 +475,7 @@ pub fn expand(query: &Query) -> TokenStream {
         &env,
         &query.select,
         &mut pending_lets,
+        &optional_joins,
     );
 
     // Wrapper: source → into_iter → initial env tuple → pipeline.
@@ -390,7 +495,7 @@ pub fn expand(query: &Query) -> TokenStream {
     quote! {
         {
             #[allow(unused_imports)]
-            use ::oql::__private::SortAndStrip as _;
+            use ::oql::__private::{MustZipExt as _, SortAndStrip as _};
             #preamble
             ::core::iter::IntoIterator::into_iter(#source)
                 #initial_map
@@ -436,8 +541,14 @@ fn analyze_from(from: &FromClause) -> (TokenStream, Vec<Ident>) {
 /// `live` flag only controls whether the name ends up in the outgoing
 /// environment tuple, not whether the let itself is emitted. Side effects
 /// of the let expression are always preserved.
-fn let_statements(pending: &[(Ident, Expr, bool, bool)]) -> TokenStream {
-    let lines = pending.iter().map(|(n, v, _live, _shadow)| quote!( let #n = #v; ));
+fn let_statements(
+    pending: &[(Ident, Expr, bool, bool)],
+    optional_joins: &HashSet<String>,
+) -> TokenStream {
+    let lines = pending.iter().map(|(n, v, _live, _shadow)| {
+        let v = rewrite_optional_field_access(v, optional_joins);
+        quote!( let #n = #v; )
+    });
     quote!( #( #lines )* )
 }
 
@@ -454,6 +565,7 @@ fn emit_where(
     outgoing_env: &[Ident],
     cond: &Expr,
     pending_lets: &mut Vec<(Ident, Expr, bool, bool)>,
+    optional_joins: &HashSet<String>,
 ) {
     // The closure destructures the *incoming* env (without the pending lets),
     // executes the pending lets, then evaluates the condition. The rebuilt
@@ -476,7 +588,8 @@ fn emit_where(
         .collect();
     let pat = tuple_pat(&incoming_env);
     let rebuild = tuple_build(outgoing_env);
-    let lets = let_statements(pending_lets);
+    let lets = let_statements(pending_lets, optional_joins);
+    let cond = rewrite_optional_field_access(cond, optional_joins);
     let cond_tokens = quote!(#cond);
     let all_used_tokens = {
         let mut t = cond_tokens.clone();
@@ -503,6 +616,7 @@ fn emit_select(
     env: &[Ident],
     select: &SelectClause,
     pending_lets: &mut Vec<(Ident, Expr, bool, bool)>,
+    optional_joins: &HashSet<String>,
 ) {
     // For select, the env passed in is already live-filtered (by expand).
     // Pending lets are emitted as statements so they're in scope for the
@@ -522,8 +636,8 @@ fn emit_select(
         .cloned()
         .collect();
     let pat = tuple_pat(&incoming_env);
-    let proj = &select.expr;
-    let lets = let_statements(pending_lets);
+    let proj = rewrite_optional_field_access(&select.expr, optional_joins);
+    let lets = let_statements(pending_lets, optional_joins);
     let proj_tokens = quote!(#proj);
     let all_used_tokens = {
         let mut t = proj_tokens.clone();
@@ -537,6 +651,171 @@ fn emit_select(
             #touch
             #lets
             #proj
+        })
+    });
+}
+
+fn rewrite_optional_field_access(expr: &Expr, optional_joins: &HashSet<String>) -> Expr {
+    let mut out = expr.clone();
+    OptionalFieldRewriter { optional_joins }.visit_expr_mut(&mut out);
+    out
+}
+
+struct OptionalFieldRewriter<'a> {
+    optional_joins: &'a HashSet<String>,
+}
+
+impl VisitMut for OptionalFieldRewriter<'_> {
+    fn visit_expr_mut(&mut self, expr: &mut Expr) {
+        if let Expr::Field(field) = expr {
+            if let Expr::Path(base) = field.base.as_ref() {
+                if base.path.segments.len() == 1 {
+                    let ident = &base.path.segments[0].ident;
+                    if self.optional_joins.contains(&ident.to_string()) {
+                        let member = &field.member;
+                        *expr = optional_field_projection(ident, member);
+                        return;
+                    }
+                }
+            }
+        }
+
+        visit_mut::visit_expr_mut(self, expr);
+    }
+}
+
+fn optional_field_projection(ident: &Ident, member: &Member) -> Expr {
+    syn::parse2(quote! {
+        #ident.as_ref().map(|__oql_left| (&__oql_left.#member).clone())
+    })
+    .expect("generated left-join field projection should parse")
+}
+
+fn emit_zip(
+    pipeline: &mut TokenStream,
+    env: &[Ident],
+    outgoing_env: &[Ident],
+    name: &Ident,
+    source: &Expr,
+    must_match: bool,
+    pending_lets: &mut Vec<(Ident, Expr, bool, bool)>,
+    optional_joins: &HashSet<String>,
+) {
+    let pending_names: HashSet<String> = pending_lets
+        .iter()
+        .filter(|(_n, _, live, shadow)| *live && !*shadow)
+        .map(|(n, _, _, _)| n.to_string())
+        .collect();
+    let incoming_env: Vec<Ident> = env
+        .iter()
+        .filter(|id| !pending_names.contains(&id.to_string()))
+        .cloned()
+        .collect();
+    let outer_pat = tuple_pat(&incoming_env);
+    let new_tuple = tuple_build(outgoing_env);
+    let lets = let_statements(pending_lets, optional_joins);
+    let all_used = {
+        let mut t = quote!(#name);
+        t.extend(pending_expr_tokens(pending_lets));
+        t
+    };
+    let touch = touch_unused(&incoming_env, &all_used);
+    pending_lets.clear();
+
+    let zip_call = if must_match {
+        quote! {
+            .__oql_must_zip(#source)
+        }
+    } else {
+        quote! {
+            .zip(#source)
+        }
+    };
+
+    pipeline.extend(quote! {
+        #zip_call
+        .map(|(#outer_pat, #name)| {
+            #touch
+            #lets
+            #new_tuple
+        })
+    });
+}
+
+#[allow(clippy::too_many_arguments)]
+fn emit_last_join(
+    preamble: &mut TokenStream,
+    pipeline: &mut TokenStream,
+    env: &[Ident],
+    outgoing_env: &[Ident],
+    name: &Ident,
+    source: &Expr,
+    outer_key: &Expr,
+    inner_key: &Expr,
+    counter: usize,
+    pending_lets: &mut Vec<(Ident, Expr, bool, bool)>,
+    optional_joins: &HashSet<String>,
+) {
+    let map_ident = Ident::new(
+        &format!("__oql_last_join_map_{counter}"),
+        proc_macro2::Span::call_site(),
+    );
+
+    preamble.extend(quote! {
+        let #map_ident = {
+            let __oql_inner_source = #source;
+            let __oql_inner_iter = ::core::iter::IntoIterator::into_iter(__oql_inner_source);
+            let __oql_hint = ::core::iter::Iterator::size_hint(&__oql_inner_iter).0;
+            let mut __oql_map: ::std::collections::HashMap<_, _> =
+                ::std::collections::HashMap::with_capacity(__oql_hint);
+            for #name in __oql_inner_iter {
+                let __oql_k = (&(#inner_key)).clone();
+                __oql_map.insert(__oql_k, #name);
+            }
+            __oql_map
+        };
+    });
+
+    let pending_names: HashSet<String> = pending_lets
+        .iter()
+        .filter(|(_n, _, live, shadow)| *live && !*shadow)
+        .map(|(n, _, _, _)| n.to_string())
+        .collect();
+    let incoming_env: Vec<Ident> = env
+        .iter()
+        .filter(|id| !pending_names.contains(&id.to_string()))
+        .cloned()
+        .collect();
+    let outer_pat = tuple_pat(&incoming_env);
+    let new_tuple = tuple_build(outgoing_env);
+    let lets = let_statements(pending_lets, optional_joins);
+    let all_used = {
+        let mut t = quote!(#outer_key);
+        t.extend(pending_expr_tokens(pending_lets));
+        t
+    };
+    let touch = touch_unused(&incoming_env, &all_used);
+    pending_lets.clear();
+
+    let clones_vec: Vec<TokenStream> = outgoing_env
+        .iter()
+        .filter(|i| i != &name)
+        .map(|i| quote!( let #i = ::core::clone::Clone::clone(&#i); ))
+        .collect();
+
+    pipeline.extend(quote! {
+        .map(move |#outer_pat| {
+            #touch
+            #lets
+            let __oql_outer_key = (&(#outer_key)).clone();
+            let #name = match #map_ident.get(&__oql_outer_key) {
+                ::core::option::Option::None => {
+                    ::core::panic!("oql last_must found no matching inner row")
+                }
+                ::core::option::Option::Some(__m) => ::core::clone::Clone::clone(__m),
+            };
+            #( #clones_vec )*
+            #new_tuple
         })
     });
 }
@@ -575,8 +854,11 @@ fn emit_join(
     source: &Expr,
     outer_key: &Expr,
     inner_key: &Expr,
+    must_match: bool,
+    left_join: bool,
     counter: usize,
     pending_lets: &mut Vec<(Ident, Expr, bool, bool)>,
+    optional_joins: &HashSet<String>,
     // If `Some(cond)`, the following `where` clause is fused into this
     // join's flat_map body: matches whose (outer, inner) pair fails
     // `cond` are skipped before emission, no separate `.filter_map()`
@@ -640,7 +922,7 @@ fn emit_join(
     // The outgoing tuple contains only the bindings the live-analysis
     // said are still needed (minus dead intermediates).
     let new_tuple = tuple_build(outgoing_env);
-    let lets = let_statements(pending_lets);
+    let lets = let_statements(pending_lets, optional_joins);
     let all_used = {
         let mut t = quote!(#outer_key);
         t.extend(pending_expr_tokens(pending_lets));
@@ -707,6 +989,41 @@ fn emit_join(
         ),
         ::core::option::Option::None => (quote!(), quote!()),
     };
+    let missing_match = if left_join {
+        quote! {
+            let #name = ::core::option::Option::None;
+            #( #clones_vec )*
+            return ::oql::__private::JoinMatches::Once(
+                ::core::option::Option::Some(#new_tuple),
+            )
+        }
+    } else if must_match {
+        quote! {
+            ::core::panic!("oql join_must found no matching inner row")
+        }
+    } else {
+        quote! {
+            return ::oql::__private::JoinMatches::Empty
+        }
+    };
+    let match_binding_once = if left_join {
+        quote! {
+            ::core::option::Option::Some(::core::clone::Clone::clone(&__oql_matches[0]))
+        }
+    } else {
+        quote! {
+            ::core::clone::Clone::clone(&__oql_matches[0])
+        }
+    };
+    let match_binding_many = if left_join {
+        quote! {
+            ::core::option::Option::Some(::core::clone::Clone::clone(__oql_inner))
+        }
+    } else {
+        quote! {
+            ::core::clone::Clone::clone(__oql_inner)
+        }
+    };
     pipeline.extend(quote! {
         .flat_map(move |#outer_pat| {
             #touch
@@ -714,12 +1031,12 @@ fn emit_join(
             let __oql_outer_key = (&(#outer_key)).clone();
             let __oql_matches = match #map_ident.get(&__oql_outer_key) {
                 ::core::option::Option::None => {
-                    return ::oql::__private::JoinMatches::Empty;
+                    #missing_match
                 }
                 ::core::option::Option::Some(__m) => __m,
             };
             if __oql_matches.len() == 1 {
-                let #name = ::core::clone::Clone::clone(&__oql_matches[0]);
+                let #name = #match_binding_once;
                 #( #clones_vec )*
                 #once_where_check
                 return ::oql::__private::JoinMatches::Once(
@@ -729,7 +1046,7 @@ fn emit_join(
             let mut __oql_emit: ::std::vec::Vec<_> =
                 ::std::vec::Vec::with_capacity(__oql_matches.len());
             for __oql_inner in __oql_matches.iter() {
-                let #name = ::core::clone::Clone::clone(__oql_inner);
+                let #name = #match_binding_many;
                 #( #clones_vec )*
                 #many_where_check
                 __oql_emit.push(#new_tuple);
@@ -772,8 +1089,11 @@ fn emit_group_join(
     source: &Expr,
     outer_key: &Expr,
     inner_key: &Expr,
+    must_match: bool,
+    _left_join: bool,
     counter: usize,
     pending_lets: &mut Vec<(Ident, Expr, bool, bool)>,
+    optional_joins: &HashSet<String>,
 ) {
     let map_ident = Ident::new(
         &format!("__oql_gjoin_map_{counter}"),
@@ -812,7 +1132,7 @@ fn emit_group_join(
         .collect();
     let outer_pat = tuple_pat(&incoming_env);
     let new_tuple = tuple_build(outgoing_env);
-    let lets = let_statements(pending_lets);
+    let lets = let_statements(pending_lets, optional_joins);
     let all_used = {
         let mut t = quote!(#outer_key);
         t.extend(pending_expr_tokens(pending_lets));
@@ -834,13 +1154,22 @@ fn emit_group_join(
     // meaningless; it's just a closure-parameter shadow mis-classified
     // by the over-approximate liveness analysis).
     let _ = name; // unused in the group-join emit path; name carries no runtime value
+    let missing_group = if must_match {
+        quote! {
+            ::core::panic!("oql join_must found no matching inner row")
+        }
+    } else {
+        quote! {
+            ::std::vec::Vec::new()
+        }
+    };
     pipeline.extend(quote! {
         .map(move |#outer_pat| {
             #touch
             #lets
             let __oql_outer_key = (&(#outer_key)).clone();
             let #group_name: ::std::vec::Vec<_> = match #map_ident.get(&__oql_outer_key) {
-                ::core::option::Option::None => ::std::vec::Vec::new(),
+                ::core::option::Option::None => #missing_group,
                 ::core::option::Option::Some(__m) => ::core::clone::Clone::clone(__m),
             };
             #new_tuple
@@ -870,6 +1199,7 @@ fn emit_group_by(
     element: &Expr,
     key: &Expr,
     pending_lets: &mut Vec<(Ident, Expr, bool, bool)>,
+    optional_joins: &HashSet<String>,
 ) {
     // Same incoming-env computation as the other emitters.
     let pending_names: HashSet<String> = pending_lets
@@ -883,7 +1213,7 @@ fn emit_group_by(
         .cloned()
         .collect();
     let pat = tuple_pat(&incoming_env);
-    let lets = let_statements(pending_lets);
+    let lets = let_statements(pending_lets, optional_joins);
     let all_used = {
         let mut t = quote!(#element);
         t.extend(quote!(#key));
@@ -971,6 +1301,7 @@ fn flush_sorts(
     pending: &mut Vec<(Expr, bool)>,
     pending_lets: &mut Vec<(Ident, Expr, bool, bool)>,
     live_after: &HashSet<String>,
+    optional_joins: &HashSet<String>,
 ) -> Vec<Ident> {
     if pending.is_empty() {
         // Even without sorts: pending lets stay queued for the next step
@@ -1002,7 +1333,7 @@ fn flush_sorts(
         .cloned()
         .collect();
     let rebuild = tuple_build(&outgoing_env);
-    let lets = let_statements(pending_lets);
+    let lets = let_statements(pending_lets, optional_joins);
 
     // Build composite key. Each part becomes an owned value via
     // `(&(expr)).clone()`; method-call auto-deref turns the value into a
@@ -1012,6 +1343,7 @@ fn flush_sorts(
     let key_items: Vec<TokenStream> = pending
         .iter()
         .map(|(expr, desc)| {
+            let expr = rewrite_optional_field_access(expr, optional_joins);
             let owned = quote!( (&(#expr)).clone() );
             if *desc {
                 quote!( ::core::cmp::Reverse(#owned) )

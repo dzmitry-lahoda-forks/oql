@@ -34,14 +34,32 @@ fn group_by_counts_per_key() {
 #[test]
 fn group_by_with_aggregate_via_iterator() {
     #[derive(Clone)]
-    struct Order { customer: &'static str, amount: u64 }
+    struct Order {
+        customer: &'static str,
+        amount: u64,
+    }
 
     let orders = vec![
-        Order { customer: "A", amount: 10 },
-        Order { customer: "B", amount: 20 },
-        Order { customer: "A", amount: 30 },
-        Order { customer: "B", amount: 5 },
-        Order { customer: "A", amount: 15 },
+        Order {
+            customer: "A",
+            amount: 10,
+        },
+        Order {
+            customer: "B",
+            amount: 20,
+        },
+        Order {
+            customer: "A",
+            amount: 30,
+        },
+        Order {
+            customer: "B",
+            amount: 5,
+        },
+        Order {
+            customer: "A",
+            amount: 15,
+        },
     ];
 
     let mut out: Vec<(&'static str, u64)> = oql! {
@@ -120,20 +138,47 @@ fn group_by_after_join() {
     // (outer + inner) are all lost at the group-by barrier;
     // only the group survives.
     #[derive(Clone)]
-    struct Order { customer_id: u32, amount: u64 }
+    struct Order {
+        customer_id: u32,
+        amount: u64,
+    }
     #[derive(Clone)]
-    struct Customer { id: u32, country: &'static str }
+    struct Customer {
+        id: u32,
+        country: &'static str,
+    }
 
     let orders = vec![
-        Order { customer_id: 1, amount: 100 },
-        Order { customer_id: 2, amount: 50 },
-        Order { customer_id: 1, amount: 30 },
-        Order { customer_id: 3, amount: 200 },
+        Order {
+            customer_id: 1,
+            amount: 100,
+        },
+        Order {
+            customer_id: 2,
+            amount: 50,
+        },
+        Order {
+            customer_id: 1,
+            amount: 30,
+        },
+        Order {
+            customer_id: 3,
+            amount: 200,
+        },
     ];
     let customers = vec![
-        Customer { id: 1, country: "DE" },
-        Customer { id: 2, country: "DE" },
-        Customer { id: 3, country: "IT" },
+        Customer {
+            id: 1,
+            country: "DE",
+        },
+        Customer {
+            id: 2,
+            country: "DE",
+        },
+        Customer {
+            id: 3,
+            country: "IT",
+        },
     ];
 
     // Total revenue per country.
@@ -154,12 +199,24 @@ fn group_by_on_projection() {
     // Group an expression rather than the range variable itself.
     // Here we group amounts (the projection) by customer.
     #[derive(Clone)]
-    struct Order { customer: &'static str, amount: u64 }
+    struct Order {
+        customer: &'static str,
+        amount: u64,
+    }
 
     let orders = vec![
-        Order { customer: "A", amount: 10 },
-        Order { customer: "B", amount: 20 },
-        Order { customer: "A", amount: 30 },
+        Order {
+            customer: "A",
+            amount: 10,
+        },
+        Order {
+            customer: "B",
+            amount: 20,
+        },
+        Order {
+            customer: "A",
+            amount: 30,
+        },
     ];
 
     let mut out: Vec<(&'static str, Vec<u64>)> = oql! {
@@ -171,7 +228,14 @@ fn group_by_on_projection() {
 
     out.sort_by_key(|(k, _)| *k);
     assert_eq!(out[0].0, "A");
-    assert_eq!({ let mut v = out[0].1.clone(); v.sort(); v }, vec![10, 30]);
+    assert_eq!(
+        {
+            let mut v = out[0].1.clone();
+            v.sort();
+            v
+        },
+        vec![10, 30]
+    );
     assert_eq!(out[1], ("B", vec![20]));
 }
 
@@ -180,12 +244,20 @@ fn group_by_on_projection() {
 #[test]
 fn group_join_basic() {
     #[derive(Clone)]
-    struct Customer { id: u32, name: &'static str }
+    struct Customer {
+        id: u32,
+        name: &'static str,
+    }
     #[derive(Clone)]
-    struct Order { customer_id: u32 }
+    struct Order {
+        customer_id: u32,
+    }
 
     let customers = vec![
-        Customer { id: 1, name: "Anna" },
+        Customer {
+            id: 1,
+            name: "Anna",
+        },
         Customer { id: 2, name: "Ben" },
     ];
     let orders = vec![
@@ -210,14 +282,25 @@ fn group_join_empty_groups_preserved() {
     // Group-join has left-join semantics: outer rows with no match
     // still produce output, with an empty group.
     #[derive(Clone)]
-    struct Customer { id: u32, name: &'static str }
+    struct Customer {
+        id: u32,
+        name: &'static str,
+    }
     #[derive(Clone)]
-    struct Order { customer_id: u32 }
+    struct Order {
+        customer_id: u32,
+    }
 
     let customers = vec![
-        Customer { id: 1, name: "Anna" },
+        Customer {
+            id: 1,
+            name: "Anna",
+        },
         Customer { id: 2, name: "Ben" },
-        Customer { id: 3, name: "Cleo" },
+        Customer {
+            id: 3,
+            name: "Cleo",
+        },
     ];
     // No orders for customer 2.
     let orders = vec![
@@ -242,19 +325,27 @@ fn group_join_then_where() {
     // Filter outer rows by a property of their group; e.g. keep only
     // customers with at least one order.
     #[derive(Clone)]
-    struct Customer { id: u32, name: &'static str }
+    struct Customer {
+        id: u32,
+        name: &'static str,
+    }
     #[derive(Clone)]
-    struct Order { customer_id: u32 }
+    struct Order {
+        customer_id: u32,
+    }
 
     let customers = vec![
-        Customer { id: 1, name: "Anna" },
+        Customer {
+            id: 1,
+            name: "Anna",
+        },
         Customer { id: 2, name: "Ben" },
-        Customer { id: 3, name: "Cleo" },
+        Customer {
+            id: 3,
+            name: "Cleo",
+        },
     ];
-    let orders = vec![
-        Order { customer_id: 1 },
-        Order { customer_id: 3 },
-    ];
+    let orders = vec![Order { customer_id: 1 }, Order { customer_id: 3 }];
 
     let mut out: Vec<&'static str> = oql! {
         from c in customers
@@ -272,19 +363,40 @@ fn group_join_then_where() {
 fn group_join_with_sum_on_group() {
     // Classic "orders per customer" report.
     #[derive(Clone)]
-    struct Customer { id: u32, name: &'static str }
+    struct Customer {
+        id: u32,
+        name: &'static str,
+    }
     #[derive(Clone)]
-    struct Order { customer_id: u32, amount: u64 }
+    struct Order {
+        customer_id: u32,
+        amount: u64,
+    }
 
     let customers = vec![
-        Customer { id: 1, name: "Anna" },
+        Customer {
+            id: 1,
+            name: "Anna",
+        },
         Customer { id: 2, name: "Ben" },
     ];
     let orders = vec![
-        Order { customer_id: 1, amount: 50 },
-        Order { customer_id: 1, amount: 75 },
-        Order { customer_id: 2, amount: 100 },
-        Order { customer_id: 1, amount: 25 },
+        Order {
+            customer_id: 1,
+            amount: 50,
+        },
+        Order {
+            customer_id: 1,
+            amount: 75,
+        },
+        Order {
+            customer_id: 2,
+            amount: 100,
+        },
+        Order {
+            customer_id: 1,
+            amount: 25,
+        },
     ];
 
     let mut out: Vec<(&'static str, u64)> = oql! {

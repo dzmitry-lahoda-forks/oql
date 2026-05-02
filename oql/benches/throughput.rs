@@ -8,7 +8,7 @@
 use std::collections::HashMap;
 use std::hint::black_box;
 
-use criterion::{criterion_group, criterion_main, Criterion};
+use criterion::{Criterion, criterion_group, criterion_main};
 use oql::oql;
 
 #[derive(Clone, Debug)]
@@ -31,7 +31,9 @@ fn make_data(n_orders: usize, n_customers: usize) -> (Vec<Order>, Vec<Customer>)
     // cheap, repeatable pseudo-randomness, not crypto.
     let mut state: u64 = 0xc0ffee_1234_5678;
     let mut next = || {
-        state = state.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+        state = state
+            .wrapping_mul(6364136223846793005)
+            .wrapping_add(1442695040888963407);
         state
     };
 
